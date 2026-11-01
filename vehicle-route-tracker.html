@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Route Tracker</title>
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    >
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            color: #17212b;
+            background: #f3f6f8;
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        main {
+            width: min(100% - 32px, 1100px);
+            margin: 28px auto;
+        }
+
+        h1 { margin: 0 0 8px; font-size: 1.65rem; }
+        .intro { margin: 0 0 20px; color: #526170; }
+
+        .panel {
+            padding: 18px;
+            border: 1px solid #dfe5eb;
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 4px 18px #17212b0d;
+        }
+
+        .fields {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        label { display: block; font-size: 0.9rem; font-weight: 650; }
+        label span { display: block; margin-bottom: 6px; }
+
+        input {
+            width: 100%;
+            min-height: 42px;
+            padding: 9px 11px;
+            border: 1px solid #cbd4dd;
+            border-radius: 7px;
+            font: inherit;
+        }
+
+        input:focus {
+            border-color: #16865a;
+            outline: 3px solid #16865a24;
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button {
+            min-height: 40px;
+            padding: 8px 15px;
+            border: 0;
+            border-radius: 7px;
+            background: #16865a;
+            color: white;
+            font: inherit;
+            font-weight: 650;
+            cursor: pointer;
+        }
+
+        button:hover:not(:disabled) { background: #106c47; }
+        button:disabled { cursor: wait; opacity: .6; }
+        button.secondary { background: #e8edf1; color: #17212b; }
+        button.secondary:hover:not(:disabled) { background: #dce3e9; }
+
+        #status {
+            min-height: 1.4em;
+            margin: 14px 0 10px;
+            color: #465564;
+            font-size: 0.92rem;
+        }
+
+        #map {
+            height: min(62vh, 590px);
+            min-height: 340px;
+            overflow: hidden;
+            border: 1px solid #dfe5eb;
+            border-radius: 10px;
+            background: #e7edf0;
+        }
+
+        .note {
+            margin: 12px 0 0;
+            color: #657382;
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+
+        .vehicle-icon {
+            display: grid;
+            width: 34px;
+            height: 34px;
+            place-items: center;
+            border: 2px solid white;
+            border-radius: 50%;
+            background: #e65d25;
+            box-shadow: 0 2px 8px #0005;
+            font-size: 19px;
+        }
+
+        @media (max-width: 640px) {
+            main { width: min(100% - 20px, 1100px); margin: 12px auto; }
+            .panel { padding: 13px; }
+            .fields { grid-template-columns: 1fr; gap: 11px; }
+            #map { height: 55vh; min-height: 300px; }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Vehicle Route Tracker</h1>
+        <p class="intro">Plan a route within Kenya and preview a vehicle moving along it.</p>
+
+        <section class="panel" aria-label="Route controls">
+            <div class="fields">
+                <label>
+                    <span>Start location in Kenya</span>
+                    <input id="start" value="Nairobi, Kenya" autocomplete="off" placeholder="Town, address, or latitude, longitude">
+                </label>
+                <label>
+                    <span>Destination in Kenya</span>
+                    <input id="destination" value="Westlands, Nairobi, Kenya" autocomplete="off" placeholder="Town, address, or latitude, longitude">
+                </label>
+            </div>
+            <div class="actions">
+                <button id="route-button" type="button">Find route</button>
+                <button id="play-button" class="secondary" type="button" disabled>Start simulation</button>
+                <button id="stop-button" class="secondary" type="button" disabled>Stop</button>
+            </div>
+            <p id="status" role="status" aria-live="polite">Enter Kenyan towns/addresses or coordinates as latitude, longitude.</p>
+            <div id="map" aria-label="Map showing the route"></div>
+            <p class="note">
+                This page animates a demo marker; it does not track a real vehicle.
+                Live tracking should use an authorized vehicle/device location feed with the driver's knowledge and consent.
+                Routes are restricted to an approximate Kenya boundary. Place search uses OpenStreetMap's Nominatim service; map tiles and route lookup require an internet connection.
+            </p>
+        </section>
+    </main>
+
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+    <script>
+        const map = L.map("map").setView([-1.2864, 36.8172], 13);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        const routeButton = document.querySelector("#route-button");
+        const playButton = document.querySelector("#play-button");
+        const stopButton = document.querySelector("#stop-button");
+        const status = document.querySelector("#status");
+        const vehicleIcon = L.divIcon({
+            className: "",
+            html: '<span class="vehicle-icon" aria-label="Vehicle">🚗</span>',
+            iconSize: [34, 34],
+            iconAnchor: [17, 17]
+        });
+
+        let routeLine;
+        let startMarker;
+        let destinationMarker;
+        let vehicleMarker;
+        let routeCoordinates = [];
+        let animationFrame = null;
+        let animationStart = 0;
+        let lastGeocodeRequest = 0;
+        const simulationDuration = 20000;
+
+        const kenyaBoundary = [
+            [5.0, 34.0],
+            [5.0, 35.5],
+            [4.6, 37.0],
+            [4.6, 39.0],
+            [4.3, 41.0],
+            [4.1, 41.9],
+            [2.0, 41.9],
+            [0.5, 41.7],
+            [-1.0, 41.3],
+            [-1.7, 40.9],
+            [-2.5, 40.4],
+            [-4.7, 39.2],
+            [-4.6, 38.5],
+            [-3.5, 37.5],
+            [-3.0, 36.0],
+            [-1.5, 34.5],
+            [-1.0, 33.9],
+            [0.5, 34.0],
+            [2.0, 34.0],
+            [3.5, 34.2]
+        ];
+
+        function isInsideKenya([latitude, longitude]) {
+            let inside = false;
+            for (let i = 0, j = kenyaBoundary.length - 1; i < kenyaBoundary.length; j = i++) {
+                const [latI, lonI] = kenyaBoundary[i];
+                const [latJ, lonJ] = kenyaBoundary[j];
+                const crossesLatitude = (latI > latitude) !== (latJ > latitude);
+                const crossingLongitude = ((lonJ - lonI) * (latitude - latI)) / (latJ - latI) + lonI;
+                if (crossesLatitude && longitude < crossingLongitude) inside = !inside;
+            }
+            return inside;
+        }
+
+        function parseCoordinates(selector) {
+            const raw = selector.split(",");
+            if (raw.length !== 2) throw new Error("Enter coordinates as latitude, longitude.");
+
+            const latitude = Number(raw[0].trim());
+            const longitude = Number(raw[1].trim());
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+                latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+                throw new Error("Coordinates are invalid. Latitude must be -90 to 90 and longitude -180 to 180.");
+            }
+            const point = [latitude, longitude];
+            if (!isInsideKenya(point)) {
+                throw new Error("Both locations must be within Kenya. Enter coordinates as latitude, longitude.");
+            }
+            return point;
+        }
+
+        function parseLocationInput(selector) {
+            const value = document.querySelector(selector).value.trim();
+            if (!value) throw new Error("Enter a start and destination location.");
+
+            const parts = value.split(",");
+            if (parts.length === 2 && parts.every(part => Number.isFinite(Number(part.trim())))) {
+                return { point: parseCoordinates(value), label: value };
+            }
+            return { query: value };
+        }
+
+        async function geocodeKenyanPlace(query) {
+            const wait = Math.max(0, 1100 - (Date.now() - lastGeocodeRequest));
+            if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+
+            const params = new URLSearchParams({
+                q: query,
+                countrycodes: "ke",
+                format: "jsonv2",
+                addressdetails: "1",
+                limit: "1"
+            });
+            lastGeocodeRequest = Date.now();
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+            if (!response.ok) throw new Error(`Place search returned HTTP ${response.status}.`);
+
+            const results = await response.json();
+            const result = results[0];
+            if (!result || result.address?.country_code !== "ke") {
+                throw new Error(`No matching place found in Kenya for "${query}". Add a town or county to narrow the search.`);
+            }
+
+            const point = [Number(result.lat), Number(result.lon)];
+            if (!point.every(Number.isFinite) || !isInsideKenya(point)) {
+                throw new Error(`The result for "${query}" is outside the supported Kenya boundary.`);
+            }
+            return { point, label: result.display_name };
+        }
+
+        async function resolveLocation(selector) {
+            const location = parseLocationInput(selector);
+            return location.point
+                ? location
+                : await geocodeKenyanPlace(location.query);
+        }
+
+        function setSimulationRunning(running) {
+            playButton.disabled = running || routeCoordinates.length < 2;
+            stopButton.disabled = !running;
+            routeButton.disabled = running;
+        }
+
+        function stopSimulation(message) {
+            if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+            animationFrame = null;
+            setSimulationRunning(false);
+            if (message) status.textContent = message;
+        }
+
+        function animateVehicle(timestamp) {
+            if (!animationStart) animationStart = timestamp;
+            const progress = Math.min((timestamp - animationStart) / simulationDuration, 1);
+            const index = Math.min(
+                Math.floor(progress * (routeCoordinates.length - 1)),
+                routeCoordinates.length - 2
+            );
+            const segmentProgress = progress === 1 ? 1 : (progress * (routeCoordinates.length - 1)) - index;
+            const from = routeCoordinates[index];
+            const to = routeCoordinates[index + 1];
+            const position = [
+                from[0] + (to[0] - from[0]) * segmentProgress,
+                from[1] + (to[1] - from[1]) * segmentProgress
+            ];
+
+            vehicleMarker.setLatLng(position);
+            status.textContent = `Demo vehicle in transit: ${Math.round(progress * 100)}%`;
+
+            if (progress < 1) {
+                animationFrame = requestAnimationFrame(animateVehicle);
+            } else {
+                animationFrame = null;
+                setSimulationRunning(false);
+                status.textContent = "Demo vehicle reached its destination.";
+            }
+        }
+
+        routeButton.addEventListener("click", async () => {
+            stopSimulation();
+            routeButton.disabled = true;
+            playButton.disabled = true;
+            status.textContent = "Looking up driving route...";
+
+            try {
+                const startLocation = await resolveLocation("#start");
+                const destinationLocation = await resolveLocation("#destination");
+                const start = startLocation.point;
+                const destination = destinationLocation.point;
+                const coordinates = `${start[1]},${start[0]};${destination[1]},${destination[0]}`;
+                const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Route service returned HTTP ${response.status}.`);
+
+                const data = await response.json();
+                if (data.code !== "Ok" || !data.routes?.length) {
+                    throw new Error("No driving route found for those coordinates.");
+                }
+
+                const coordinatesInLatLon = data.routes[0].geometry.coordinates.map(([longitude, latitude]) => [latitude, longitude]);
+                if (!coordinatesInLatLon.every(isInsideKenya)) {
+                    throw new Error("That route leaves the supported Kenya boundary. Try locations farther inside Kenya.");
+                }
+                routeCoordinates = coordinatesInLatLon;
+
+                if (routeLine) map.removeLayer(routeLine);
+                if (startMarker) map.removeLayer(startMarker);
+                if (destinationMarker) map.removeLayer(destinationMarker);
+                if (vehicleMarker) map.removeLayer(vehicleMarker);
+
+                routeLine = L.polyline(routeCoordinates, { color: "#16865a", weight: 5 }).addTo(map);
+                startMarker = L.marker(start).bindPopup(`Start: ${startLocation.label}`).addTo(map);
+                destinationMarker = L.marker(destination).bindPopup(`Destination: ${destinationLocation.label}`).addTo(map);
+                vehicleMarker = L.marker(routeCoordinates[0], { icon: vehicleIcon })
+                    .bindPopup("Simulated vehicle")
+                    .addTo(map);
+
+                map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+                playButton.disabled = false;
+                status.textContent = `Route ready: ${(data.routes[0].distance / 1000).toFixed(1)} km, estimated ${(data.routes[0].duration / 60).toFixed(0)} min.`;
+            } catch (error) {
+                routeCoordinates = [];
+                playButton.disabled = true;
+                status.textContent = error instanceof TypeError
+                    ? "Could not reach the online route service. Check your internet connection and try again."
+                    : error.message;
+            } finally {
+                routeButton.disabled = false;
+            }
+        });
+
+        playButton.addEventListener("click", () => {
+            if (routeCoordinates.length < 2 || !vehicleMarker) return;
+            animationStart = 0;
+            setSimulationRunning(true);
+            animationFrame = requestAnimationFrame(animateVehicle);
+        });
+
+        stopButton.addEventListener("click", () => {
+            stopSimulation("Simulation stopped.");
+        });
+    </script>
+</body>
+</html>
